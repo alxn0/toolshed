@@ -22,6 +22,11 @@ FIND_MAX_DEPTH=5
 FIND_PRUNED_NAMES=('.*' node_modules go R target)
 # Seconds to wait for each expected screen before giving up and printing the pane.
 SCREEN_TIMEOUT_SECONDS=20
+# Seconds between two reads of the pane while waiting for a screen.
+SCREEN_POLL_SECONDS=0.5
+# Characters allowed in a session name: tmux forbids . and :, and a leading -
+# would make claude read the name as an option.
+SESSION_NAME_CHARS='A-Za-z0-9_-'
 # Screen text Claude Code (v2.1) shows once Remote Control runs, and on the trust prompt.
 REMOTE_CONTROL_ACTIVE_TEXT='remote-control is active'
 TRUST_PROMPT_YES_TEXT='Yes, I trust this folder'
@@ -68,24 +73,31 @@ require_plain_word() {
   [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]] || die "not a folder name: '$1' (letters, digits, . _ - only)"
 }
 
+# Print the canonical path of existing directory <path>; die otherwise.
+resolve_dir() {
+  local dir
+  dir="$(realpath -e -- "$1" 2>/dev/null)" || die "no such path: $1"
+  [[ -d "$dir" ]] || die "not a directory: $dir"
+  echo "$dir"
+}
+
 command_find() {
   local word="$1" matches
   require_plain_word "$word"
-  matches="$(find_in_home "$word")"
-  [[ -n "$matches" ]] || die "no folder named '$word' under $HOME (depth $FIND_MAX_DEPTH)"
-  local match
-  while IFS= read -r match; do
-    printf 'find\t%s\n' "$match"
-  done <<<"$matches"
+  mapfile -t matches < <(find_in_home "$word")
+  ((${#matches[@]} > 0)) || die "no folder named '$word' under $HOME (depth $FIND_MAX_DEPTH)"
+  printf 'find\t%s\n' "${matches[@]}"
 }
 
 command_lookup() {
   local query="$1" dir
   # Anything with a slash, or ~ / ., is a path: use it as given.
   if [[ "$query" == */* || "$query" == "~" || "$query" == "." ]]; then
-    query="${query/#\~/$HOME}"
-    dir="$(realpath -e -- "$query" 2>/dev/null)" || die "no such path: $1"
-    [[ -d "$dir" ]] || die "not a directory: $dir"
+    # Only ~ and ~/... are expanded; ~user stays literal and fails as a path.
+    if [[ "$query" == \~ || "$query" == \~/* ]]; then
+      query="$HOME${query#\~}"
+    fi
+    dir="$(resolve_dir "$query")"
     printf 'path\t%s\n' "$dir"
     return
   fi
@@ -104,18 +116,17 @@ pane_text() {
 # Wait until the pane of session <name> shows one of the given texts; print the
 # matching text, or nothing on timeout.
 wait_for_screen() {
-  local name="$1" waited=0 pane text
+  local name="$1" deadline=$((SECONDS + SCREEN_TIMEOUT_SECONDS)) pane text
   shift
-  while ((waited < SCREEN_TIMEOUT_SECONDS)); do
-    sleep 1
-    waited=$((waited + 1))
+  while ((SECONDS < deadline)); do
     pane="$(pane_text "$name")"
     for text in "$@"; do
-      if grep -qF -- "$text" <<<"$pane"; then
+      if [[ "$pane" == *"$text"* ]]; then
         echo "$text"
         return
       fi
     done
+    sleep "$SCREEN_POLL_SECONDS"
   done
 }
 
@@ -124,15 +135,14 @@ wait_for_screen() {
 accept_trust_prompt() {
   local name="$1"
   tmux send-keys -t "=$name:" Down
-  sleep 0.5
-  if ! pane_text "$name" | grep -qF -- "❯ $TRUST_PROMPT_YES_TEXT"; then
+  if [[ -z "$(wait_for_screen "$name" "❯ $TRUST_PROMPT_YES_TEXT")" ]]; then
     tmux kill-session -t "=$name"
     die "could not select '$TRUST_PROMPT_YES_TEXT' on the trust prompt; session '$name' stopped"
   fi
   tmux send-keys -t "=$name:" Enter
 }
 
-# Print a warning and exit with <code>, leaving every existing session untouched.
+# Print a warning and exit with <code>.
 warn_and_exit() {
   local code="$1"
   shift
@@ -154,17 +164,17 @@ list_panes_in_folder() {
 }
 
 command_start() {
-  local dir name="" screen panes is_trust_allowed=false is_name_given=false
-  dir="$(realpath -e -- "$1" 2>/dev/null)" || die "no such path: $1"
-  [[ -d "$dir" ]] || die "not a directory: $dir"
+  local dir name="" screen panes is_trust_allowed=false
+  dir="$(resolve_dir "$1")"
   shift
   while (($# > 0)); do
     case "$1" in
       --trust) is_trust_allowed=true ;;
       --name)
         [[ $# -ge 2 ]] || die "--name needs a value"
+        [[ "$2" =~ ^[$SESSION_NAME_CHARS]+$ && "$2" != -* ]] ||
+          die "invalid name: '$2' (letters, digits, _ - only, not starting with -)"
         name="$2"
-        is_name_given=true
         shift
         ;;
       *) die "unknown start option: $1 (--trust, --name <name>)" ;;
@@ -172,12 +182,11 @@ command_start() {
     shift
   done
 
-  if [[ "$is_name_given" == true ]]; then
-    [[ "$name" =~ ^[A-Za-z0-9_-]+$ ]] || die "invalid name: '$name' (letters, digits, _ - only)"
-  else
+  # An explicit --name means a second session in the folder is deliberate.
+  if [[ -z "$name" ]]; then
     name="$(basename "$dir")"
-    name="${name//[^A-Za-z0-9_-]/_}" # tmux forbids . and : in session names
-    # An explicit --name means a second session in the folder is deliberate.
+    name="${name//[^$SESSION_NAME_CHARS]/_}"
+    name="${name/#-/_}"
     panes="$(list_panes_in_folder "$dir")"
     if [[ -n "$panes" ]]; then
       warn_and_exit "$EXIT_FOLDER_OPEN" "a tmux session is already open in $dir:"$'\n'"$panes"$'\n'"Nothing started. Attach to it, or rerun with --name <name> for another session."
@@ -199,10 +208,9 @@ command_start() {
   if [[ "$screen" == "$TRUST_PROMPT_YES_TEXT" ]]; then
     if [[ "$is_trust_allowed" != true ]]; then
       tmux kill-session -t "=$name"
-      echo "spawn: WARNING: Claude has never been trusted in $dir; it would get" \
+      warn_and_exit "$EXIT_UNTRUSTED" "Claude has never been trusted in $dir; it would get" \
         "read, edit and execute access there. Session '$name' stopped." \
-        "Review the folder, then rerun with --trust to answer 'Yes' automatically." >&2
-      exit "$EXIT_UNTRUSTED"
+        "Review the folder, then rerun with --trust to answer 'Yes' automatically."
     fi
     echo "Trust prompt answered 'Yes' for $dir (--trust)."
     accept_trust_prompt "$name"
