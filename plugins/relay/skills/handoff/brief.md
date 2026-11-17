@@ -1,6 +1,7 @@
 # Handoff brief format
 
-Shared by `handoff` (writes it) and `inbox` (reads it). One file per handoff, named
+Shared by `handoff` (writes it) and `inbox` (reads it); `scripts/check-brief.sh`
+enforces it on both sides. One file per handoff, named
 `<YYYY-MM-DD>-<slug>.md`, slug in lowercase kebab-case (`2026-11-08-kit-todo`).
 
 The receiver has none of the sender's context: the brief must stand alone.
