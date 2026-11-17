@@ -33,13 +33,10 @@ if [[ $target == "$LOCAL_TARGET" ]]; then
   mkdir -p "$SEND_DIR"
   [[ ! -e $SEND_DIR/$brief_name ]] || fail "$SEND_DIR/$brief_name already exists"
   cp -- "$brief" "$SEND_DIR/"
-  source_path="$(whoami)@$(hostname):send/$brief_name"
   cat <<EOF
 staged $brief_name in $SEND_DIR/
-on the receiver, move it to the inbox with:
-  rsync --remove-source-files $source_path ~/inbox/
-or, without rsync, copy it with:
-  scp $source_path ~/inbox/
+on the receiver, pull it into the inbox and process it with:
+  /inbox --pull <ssh alias of this machine, e.g. $(whoami)@$(hostname)>
 EOF
   exit 0
 fi
