@@ -46,7 +46,7 @@ its links. Every `TODO.md` and note lives in the current folder's folio notebook
 clones: the owner's `notebooks/` store (the owner's notes repository cloned into
 `~/<host>/<owner>/notebooks`), or a local `notes/` folder elsewhere. folio's `folio-sync` service
 syncs the stores; `memo` never commits. Do not enable it next to another plugin that ships a `todo`
-skill: both would manage open items.
+skill: both would manage open items. Design: [`plugins/memo/ARCHITECTURE.md`](plugins/memo/ARCHITECTURE.md).
 
 Skills answer to their bare name (`/go`) unless another skill uses it; then use `/<plugin>:<skill>`,
 e.g. `/modes:go`.
