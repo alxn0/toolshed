@@ -13,6 +13,8 @@ A shared Claude Code plugin marketplace of small utilities. Enable only the plug
 | | `go` | `/go` | Finisher: simplify, test end-to-end, code-review. No commit |
 | `coding` | `python` | auto on `*.py` | Python conventions and tooling (uv, ruff, ty, polars) |
 | | `golang` | auto on `*.go` | Go conventions and tooling (mise, gofmt, go vet, staticcheck) |
+| `memo` | `todo` | `/todo`, and when work leaves something open | Track the project's open items in a managed `TODO.md` (`You`, `Now`, `Next`, `Later`), checked after every edit by a hook |
+| | `note` | `/note <title>` | Fleeting notes (research, design, work in progress), written only on request, until turned into docs |
 
 ## Install
 
@@ -26,7 +28,8 @@ Add to `~/.claude/settings.json`, keeping only the plugins you want:
   "enabledPlugins": {
     "relay@toolshed": true,
     "modes@toolshed": true,
-    "coding@toolshed": true
+    "coding@toolshed": true,
+    "memo@toolshed": true
   }
 }
 ```
@@ -37,6 +40,13 @@ Or from the CLI:
 claude plugin marketplace add alxn0/toolshed
 claude plugin install relay@toolshed   # repeat per plugin
 ```
+
+`memo` needs [folio](https://github.com/dixie6502/folio) on `PATH`, and `note` needs `wkref` for
+its links. Every `TODO.md` and note lives in the current folder's folio notebook, outside the
+clones: the owner's `notebooks/` store (the owner's notes repository cloned into
+`~/<host>/<owner>/notebooks`), or a local `notes/` folder elsewhere. folio's `folio-sync` service
+syncs the stores; `memo` never commits. Do not enable it next to another plugin that ships a `todo`
+skill: both would manage open items.
 
 Skills answer to their bare name (`/go`) unless another skill uses it; then use `/<plugin>:<skill>`,
 e.g. `/modes:go`.

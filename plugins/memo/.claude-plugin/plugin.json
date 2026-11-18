@@ -1,0 +1,9 @@
+{
+  "name": "memo",
+  "description": "Each project's open items in a managed TODO.md and fleeting notes, written only on the user's request, kept in the folder's folio notebook (outside every repo; folio's folio-sync service syncs the stores).",
+  "author": {
+    "name": "dixie6502"
+  },
+  "repository": "https://github.com/alxn0/toolshed",
+  "license": "MIT"
+}
