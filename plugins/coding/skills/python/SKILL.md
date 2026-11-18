@@ -1,130 +1,109 @@
 ---
-description: Python development patterns, tooling (uv, ruff, ty, polars), naming, structure, and testing conventions. Auto-loads when working with .py files.
+description: Python conventions - tooling (uv, ruff, ty, pytest), flat project layout, type hints, preferred libraries (polars), functional style, testing. Auto-loads when working with .py files.
 paths: "**/*.py"
 ---
 
-# Python Development Patterns
+# Python
 
-## Language Preferences
+## Version and style
 
-- **Python Version**: Target latest, minimum 3.10
-- **Code Style**: Follow PEP 8 with 80-character line length
-- **Type Hints**: Prefer simple static typing. AVOID using
-types from imported modules.
+- Target the latest Python, minimum 3.10, so `X | None`, `match` and built-in
+  generics are always available.
+- Line length 80, set in `pyproject.toml` under `[tool.ruff]` so ruff enforces
+  it. Short lines keep side-by-side diffs readable.
 
-## Tools & Environment
+## Type hints
 
-**Code Quality**:
-- **Formatting**: `ruff` for consistent formatting
-- **Linting**: `ruff` for comprehensive code analysis
-- **Type Checking**: `ty` (when using type hints)
+- Annotate function signatures, including third-party types (`pl.DataFrame`,
+  `requests.Response`). The signature documents the function, and `ty` can only
+  check what is annotated.
+- Use built-in generics and unions: `list[str]`, `dict[str, int]`, `X | None`.
+  Take abstract types from `collections.abc` as parameters (`Iterable`,
+  `Mapping`, `Callable`) and return concrete ones.
+- Leave local variables unannotated unless the type is unclear. Skip elaborate
+  typing (`TypeVar` chains, `Protocol` hierarchies, overloads) unless a caller
+  needs it: it costs more to read than it catches.
 
-**Project Management**:
-- **Package Manager**: `uv` primary for project management.
-    - `pixi` for `pytorch`, `tensorflow`, `c++` and other dependancies
-    that works better in conda ecosystem.
-- **Dependencies**: Specified in `pyproject.toml` or `requirements.txt`
+## Tooling
 
-## Preferred Libraries
+uv manages projects and dependencies. Use pixi instead when the project needs
+conda-ecosystem packages (PyTorch, TensorFlow, C++ libraries).
 
-**Data Processing**:
-- `polars` (primary DataFrame library)
-- `pandas` (when ecosystem requires it)
+New project with the flat layout below (uv defaults to `src/`):
 
-**Scientific Computing**:
-- `scipy` (primary for scientific computing)
-- `scikit-learn` (machine learning)
-- `numpy` (numerical operations)
+```bash
+uv init --package --name <package_name> --vcs none .
+mv src/<package_name> . && rmdir src
+printf '\n[tool.uv.build-backend]\nmodule-root = ""\n' >> pyproject.toml
+uv add --dev pytest ruff ty
+```
 
-**Web Frameworks**:
-- `streamlit` (data apps and dashboards)
+Day to day:
 
-**Testing**:
-- `pytest` with fixtures and parametrization
+- Add a dependency: `uv add <package>`
+- Format and lint: `uv run ruff format .` and `uv run ruff check .`
+- Type check: `uv run ty check`
+- Test: `uv run pytest`
 
-**Configuration**:
-- `dataclasses` for structured config
-- `python-dotenv` for environment variables
+Environment variables come from direnv, so read them with `os.environ`. Don't
+load `.env` files from code.
 
-## Naming Conventions
+## Libraries
 
-- **Files & Modules**: `snake_case` (`data_processor.py`)
-- **Functions & Variables**: `snake_case` (`process_data`, `user_count`)
-- **Classes**: `PascalCase` (`DataProcessor`, `ConfigManager`)
-- **Constants**: `SCREAMING_SNAKE_CASE` (`MAX_RETRY_ATTEMPTS`)
-- **Private Members**: Single underscore prefix (`_internal_method`)
+- DataFrames: `polars`; `pandas` only when a dependency requires it. For a
+  handful of rows the stdlib `csv` module is enough.
+- Scientific computing: `scipy`, `numpy`; machine learning: `scikit-learn`.
+- Data apps and dashboards: `streamlit`.
+- Tests: `pytest`.
+- Structured config and data records: `dataclasses`.
 
-## Project Structure
+## Project layout
 
-**Standard Layout**:
 ```
 project/
-├── project_name/          # Source code (flat structure preferred)
-├── tests/                 # Test suite
-├── docs/                  # Documentation
-├── tmp/                   # Temporary files (testing, scratch)
-├── pyproject.toml         # Project configuration
-└── requirements.txt       # Dependencies (if not using pyproject.toml)
+├── package_name/      # source, flat
+├── tests/             # test_<module>.py per module
+├── tmp/               # scratch files, git-ignored
+└── pyproject.toml
 ```
 
-**Module Organization**:
-- Store modules in `project/project_name` without nested directories
-- Use nested directories ONLY when explicitly requested or necessary
-- Organize by feature/domain, NOT by technical layer
+Keep modules directly in `package_name/`. Add subpackages only when asked or
+when the package grows past what one folder can hold readably, and split by
+feature, not by technical layer (`billing/`, not `models/`).
 
-## Programming Paradigms
+## Style
 
-**Functional Programming First**:
-- PREFER functional programming over class-oriented design
-- Use comprehensions for simple transformations
-- Use functional programming functions (`map`, `filter`, `reduce`) for complex operations
-- Prefer generators for large sequences
-- Favor pure functions and immutable data
+- Prefer pure functions and immutable data over classes. They are easier to
+  test and to reason about.
+- Use comprehensions for transformations and filtering, and generators for
+  large or lazy sequences. Comprehensions read better in Python than `map`,
+  `filter` and `reduce`.
+- Use a class when it clearly earns its place: a `dataclass` (often
+  `frozen=True`) for records, a client that holds a session or connection, or
+  state with behaviour attached. Favour composition over inheritance.
+- Cache expensive pure computations with `functools.cache`, and expensive
+  attributes with `functools.cached_property`.
 
-**Object-Oriented Design** (use only when clear advantage):
-- Data objects with `dataclass` that need methods (modify, export, visualize)
-- REST clients or API wrappers
-- When there's clear benefit for readability and usability
+## Data processing
 
-**Class Design Principles**:
-- Favor composition over inheritance
-- Use `dataclasses` for data containers
-- Keep classes focused on single responsibilities
-- Avoid unnecessary abstraction
+- Use polars method chaining, one operation per line.
+- Pass an explicit schema when reading files, so bad input fails at the
+  boundary.
+- Use lazy reading (`scan_csv`, `scan_parquet`) on large files so polars can
+  optimize the query and avoid loading everything.
 
-## Data Processing Patterns
+## Errors
 
-**Data Objects**:
-- Prefer `dataclass` with type annotations
+- Validate input at the boundary and fail with a message that names the bad
+  value.
+- Raise the most specific built-in exception. Define your own (subclass of a
+  built-in such as `ValueError`) only when callers need to tell the error
+  apart.
+- Use context managers (`with`) for files, sessions and locks.
 
-**DataFrame Operations**:
-- Prefer method chaining for readability
-- Define schemas explicitly for validation
-- Use lazy evaluation for large datasets
-- Process data in chunks when memory-constrained
+## Testing
 
-## Error Handling
-
-**Exception Strategy**:
-- Create custom exception hierarchies for domain errors
-- Validate early with descriptive error messages
-- Use specific exceptions over generic ones
-- Use context managers for resource cleanup
-
-## Testing Patterns
-
-**Pytest Best Practices**:
-- Use fixtures for shared setup/teardown
-- Parametrize tests for multiple scenarios
-- Test files in `tests/` directory, named `test_*.py`
-- One test file per module: `test_data_processor.py`
-- Use descriptive test names: `test_process_data_with_invalid_input`
-
-## Performance Considerations
-
-**Optimization Strategy**:
-- Leverage lazy evaluation and generators (yield)
-- Cache computation with class property decorator
-
-## Common Design Patterns
-**Decorators**: Cross-cutting concerns (logging, timing, auth)
+- One test file per module: `tests/test_<module>.py`.
+- Use fixtures for shared setup and `pytest.mark.parametrize` for input
+  variations.
+- Name tests after the behaviour: `test_monthly_revenue_rejects_negative_units`.
