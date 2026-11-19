@@ -16,6 +16,7 @@ A shared Claude Code plugin marketplace of small utilities. Enable only the plug
 | | `golang` | auto on `*.go` | Go conventions and tooling (mise, gofmt, go vet, staticcheck) |
 | `memo` | `todo` | `/todo`, and when work leaves something open | Track the project's open items in a managed `TODO.md` (`You`, `Now`, `Next`, `Later`), checked after every edit by a hook |
 | | `note` | `/note <title>` | Fleeting notes (research, design, work in progress), written only on request, until turned into docs |
+| `debrief` | `debrief` | `/debrief [session\|repo\|machine] [period]` | Report what was done today (or another period) in the session, the repository or across the machine: features, fixes, PRs and issues, unfinished work, from git, GitHub events and transcripts |
 
 ## Install
 
@@ -30,7 +31,8 @@ Add to `~/.claude/settings.json`, keeping only the plugins you want:
     "relay@toolshed": true,
     "modes@toolshed": true,
     "coding@toolshed": true,
-    "memo@toolshed": true
+    "memo@toolshed": true,
+    "debrief@toolshed": true
   }
 }
 ```
@@ -42,7 +44,7 @@ claude plugin marketplace add alxn0/toolshed
 claude plugin install relay@toolshed   # repeat per plugin
 ```
 
-`opencode` needs [opencode](https://opencode.ai) and `jq`. `memo` needs [folio](https://github.com/dixie6502/folio) on `PATH`, and `note` needs `wkref` for
+`opencode` needs [opencode](https://opencode.ai) and `jq`. `debrief` reads GitHub through `gh` when it is logged in. `memo` needs [folio](https://github.com/dixie6502/folio) on `PATH`, and `note` needs `wkref` for
 its links. Every `TODO.md` and note lives in the current folder's folio notebook, outside the
 clones: the owner's `notebooks/` store (the owner's notes repository cloned into
 `~/<host>/<owner>/notebooks`), or a local `notes/` folder elsewhere. folio's `folio-sync` service

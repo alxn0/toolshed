@@ -1,11 +1,12 @@
 {
   "name": "toolshed",
-  "description": "Shared Claude Code utilities: session relay, session modes, coding conventions, open items and notes.",
+  "description": "Shared Claude Code utilities: session relay, session modes, coding conventions, open items and notes, debriefs.",
   "owner": { "name": "alxn0" },
   "plugins": [
     { "name": "relay", "source": "./plugins/relay" },
     { "name": "modes", "source": "./plugins/modes" },
     { "name": "coding", "source": "./plugins/coding" },
-    { "name": "memo", "source": "./plugins/memo" }
+    { "name": "memo", "source": "./plugins/memo" },
+    { "name": "debrief", "source": "./plugins/debrief" }
   ]
 }
