@@ -8,6 +8,7 @@ A shared Claude Code plugin marketplace of small utilities. Enable only the plug
 | | `inbox` | `/inbox [--pull <host>]` | Plan and do a received brief with approval, then delete it or queue what is left; `--pull` first moves the briefs staged on `<host>` into `~/inbox/` |
 | | `whereami` | `/whereami` | Print `user@host:cwd` of the session |
 | | `spawn` | `/spawn <folder>` | Start Claude with Remote Control in a detached tmux session in a folder (path, or a word resolved via `z` then `find`, approved by you) |
+| | `opencode` | `/opencode <model-hint> <request>` | Send a read-only prompt to another model through opencode (model matched from `opencode models`, approved by you) and check its reply |
 | `modes` | `chat` | `/chat` | Read-only discussion mode: read files, search the web, no code changes |
 | | `wait` | `/wait` | Present a plan and wait for confirmation before implementing |
 | | `go` | `/go` | Finisher: simplify, test end-to-end, code-review. No commit |
@@ -41,7 +42,7 @@ claude plugin marketplace add alxn0/toolshed
 claude plugin install relay@toolshed   # repeat per plugin
 ```
 
-`memo` needs [folio](https://github.com/dixie6502/folio) on `PATH`, and `note` needs `wkref` for
+`opencode` needs [opencode](https://opencode.ai) and `jq`. `memo` needs [folio](https://github.com/dixie6502/folio) on `PATH`, and `note` needs `wkref` for
 its links. Every `TODO.md` and note lives in the current folder's folio notebook, outside the
 clones: the owner's `notebooks/` store (the owner's notes repository cloned into
 `~/<host>/<owner>/notebooks`), or a local `notes/` folder elsewhere. folio's `folio-sync` service

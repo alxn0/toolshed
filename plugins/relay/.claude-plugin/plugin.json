@@ -1,6 +1,6 @@
 {
   "name": "relay",
-  "description": "Move work between sessions and machines: handoff, inbox, whereami, spawn.",
+  "description": "Move work between sessions, machines and models: handoff, inbox, whereami, spawn, opencode.",
   "author": { "name": "alxn0" },
   "repository": "https://github.com/alxn0/toolshed",
   "license": "MIT"
