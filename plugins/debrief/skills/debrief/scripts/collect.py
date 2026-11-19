@@ -53,7 +53,7 @@ PULL_EVENTS = {
     "PullRequestReviewEvent",
     "PullRequestReviewCommentEvent",
 }
-COMMAND_TAG = re.compile(r"<command-(name|args)>(.*?)</command-\1>", re.S)
+COMMAND_TAG = re.compile(r"<command-(name|args)>(.*?)</command-\1>", re.DOTALL)
 GITHUB_REMOTE = re.compile(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$")
 REF_PREFIX = re.compile(r"^refs/(heads|remotes|tags)/")
 
@@ -141,7 +141,7 @@ def parse_period(words: list[str], today: date) -> Window:
 
 
 def parse_timestamp(text: str) -> datetime:
-    return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone()
+    return datetime.fromisoformat(text).astimezone()
 
 
 def format_time(moment: datetime) -> str:
@@ -244,7 +244,8 @@ def read_sessions(window: Window) -> list[Session]:
         for session in sessions
         if session.is_interactive and session.has_activity()
     ]
-    return sorted(active, key=lambda session: session.start)
+    # The filter above leaves only sessions with a start.
+    return sorted(active, key=lambda session: session.start or window.start)
 
 
 def find_transcript(session_id: str) -> Path:
@@ -280,7 +281,9 @@ def github_names(root: Path) -> set[str]:
     """owner/name, lowercased, of every GitHub remote of the repository."""
     urls = run(["git", "remote", "-v"], cwd=root).split()
     return {
-        match[1].lower() for url in urls if (match := GITHUB_REMOTE.search(url))
+        match[1].lower()
+        for url in urls
+        if (match := GITHUB_REMOTE.search(url))
     }
 
 
@@ -313,8 +316,10 @@ def render_session(session: Session) -> list[str]:
     title = f' "{session.title}"' if session.title else ""
     span = f"{format_time(session.start)} → {format_time(session.end)}"
     return [
-        f"### Session {session.id}{title}, {span}, in {session.cwd}"
-        f" on {session.branch or 'no branch'}",
+        (
+            f"### Session {session.id}{title}, {span}, in {session.cwd}"
+            f" on {session.branch or 'no branch'}"
+        ),
         *(f"- {turn}" for turn in session.turns),
     ]
 
@@ -325,8 +330,10 @@ def render_repo(
     email = run(["git", "config", "user.email"], cwd=root).strip()
     status = run(["git", "status", "--short", "--branch"], cwd=root)
     lines = [
-        f"## {root} (GitHub: {', '.join(sorted(names)) or 'none'};"
-        f" author {email})",
+        (
+            f"## {root} (GitHub: {', '.join(sorted(names)) or 'none'};"
+            f" author {email})"
+        ),
         "### Commits",
         *(read_commits(root, email, window) or ["- none"]),
         "### Status now",
@@ -475,8 +482,10 @@ def select(
 def collect(argv: list[str]) -> str:
     scope, window, groups = select(argv)
     lines = [
-        f"# Debrief data, {scope} scope, "
-        f"{format_time(window.start)} → {format_time(window.end)}"
+        (
+            f"# Debrief data, {scope} scope, "
+            f"{format_time(window.start)} → {format_time(window.end)}"
+        )
     ]
     names = set()
     for root in sorted(root for root in groups if root):
