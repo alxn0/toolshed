@@ -17,9 +17,14 @@ Sources, read-only:
     repositories are those the sessions of the period worked in.
   - GitHub: the user's events (`gh api users/<me>/events`), private ones
     included, which GitHub keeps for 90 days, 300 events at most.
+  - Live sessions, machine scope only: `claude agents --json` (interactive
+    and background), each matched to its tmux pane through the process
+    tree, and to its transcript for its title and latest recap. A pane's
+    screen is never read: it may hold secrets.
 
 Prints a compact text dump, one line per item, grouped by repository. A
-GitHub failure is printed in its section instead of stopping the rest.
+GitHub or live-session failure is printed in its section instead of
+stopping the rest.
 Exit codes: 0 done, 1 bad scope (no repository, unknown session), 64 usage.
 """
 
@@ -53,6 +58,8 @@ PULL_EVENTS = {
     "PullRequestReviewEvent",
     "PullRequestReviewCommentEvent",
 }
+RECAP_SUFFIX = " (disable recaps in /config)"
+TMUX_PANE_FORMAT = "#{pane_pid}\t#{session_name}:#{window_index}.#{pane_index}"
 COMMAND_TAG = re.compile(r"<command-(name|args)>(.*?)</command-\1>", re.DOTALL)
 GITHUB_REMOTE = re.compile(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$")
 REF_PREFIX = re.compile(r"^refs/(heads|remotes|tags)/")
@@ -91,6 +98,8 @@ class Session:
     end: datetime | None = None
     # Chronological `you: …`, `claude: …` and `recap: …` lines.
     turns: list[str] = field(default_factory=list)
+    # The latest recap in the window and its time.
+    last_recap: tuple[datetime, str] | None = None
 
     def has_activity(self) -> bool:
         return self.start is not None
@@ -98,6 +107,19 @@ class Session:
     def span(self) -> Window:
         assert self.start and self.end
         return Window(self.start, self.end + timedelta(seconds=1))
+
+
+@dataclass(frozen=True)
+class LiveSession:
+    """One running Claude session, as `claude agents --json` reports it."""
+
+    pid: int
+    id: str
+    cwd: str
+    kind: str
+    status: str
+    name: str
+    started: datetime | None
 
 
 def run(args: list[str], cwd: Path | None = None) -> str:
@@ -190,6 +212,7 @@ def read_records(path: Path) -> Iterable[dict]:
 def read_session(path: Path, window: Window | None) -> Session:
     """Read one transcript, keeping only what falls inside the window."""
     session = Session(id=path.stem)
+    ai_title = custom_title = ""
     pending_reply = ""  # last text of the current turn, kept at its end
 
     def end_turn() -> None:
@@ -201,7 +224,10 @@ def read_session(path: Path, window: Window | None) -> Session:
     for record in read_records(path):
         kind = record.get("type")
         if kind == "ai-title":
-            session.title = record.get("aiTitle", session.title)
+            ai_title = record.get("aiTitle", ai_title)
+            continue
+        if kind == "custom-title":
+            custom_title = record.get("customTitle", custom_title)
             continue
         if "timestamp" not in record or record.get("isSidechain"):
             continue
@@ -220,8 +246,9 @@ def read_session(path: Path, window: Window | None) -> Session:
             pending_reply = text or pending_reply
         elif kind == "system" and record.get("subtype") == "away_summary":
             end_turn()
-            recap = clip(record["content"], REPLY_CHARS)
-            session.turns.append(f"recap: {recap}")
+            recap = str(record["content"]).removesuffix(RECAP_SUFFIX)
+            session.last_recap = (moment, recap)
+            session.turns.append(f"recap: {clip(recap, REPLY_CHARS)}")
         else:
             continue
         session.cwd = record.get("cwd", session.cwd)
@@ -229,6 +256,7 @@ def read_session(path: Path, window: Window | None) -> Session:
         session.start = min(session.start or moment, moment)
         session.end = max(session.end or moment, moment)
     end_turn()
+    session.title = custom_title or ai_title  # the user's /rename wins
     return session
 
 
@@ -248,11 +276,9 @@ def read_sessions(window: Window) -> list[Session]:
     return sorted(active, key=lambda session: session.start or window.start)
 
 
-def find_transcript(session_id: str) -> Path:
-    matches = list(PROJECTS_DIR.glob(f"*/{session_id}.jsonl"))
-    if not matches:
-        raise ScopeError(f"no transcript for session {session_id}")
-    return matches[0]
+def find_transcript(session_id: str) -> Path | None:
+    """The session's transcript, or None if nothing was written yet."""
+    return next(PROJECTS_DIR.glob(f"*/{session_id}.jsonl"), None)
 
 
 @cache
@@ -405,6 +431,12 @@ def add_pull_titles(events: list[dict]) -> None:
             pull["title"] = title
 
 
+def not_read(header: str, error: Exception) -> list[str]:
+    """A section that says why its source could not be read."""
+    detail = getattr(error, "stderr", None) or str(error)
+    return [header, f"- not read: {detail.strip()}"]
+
+
 def render_github(window: Window, names: set[str] | None) -> list[str]:
     """The user's GitHub events in the window; names limits the repos."""
     try:
@@ -414,8 +446,7 @@ def render_github(window: Window, names: set[str] | None) -> list[str]:
             return ["## GitHub", "- not read: gh is not logged in"]
         events = fetch_events(login, window.start)
     except (subprocess.CalledProcessError, FileNotFoundError) as error:
-        detail = getattr(error, "stderr", None) or str(error)
-        return ["## GitHub", f"- not read: {detail.strip()}"]
+        return not_read("## GitHub", error)
     kept = [
         event
         for event in events
@@ -434,6 +465,122 @@ def render_github(window: Window, names: set[str] | None) -> list[str]:
     return [f"## GitHub, as {login}{note}", *(lines or ["- none"])]
 
 
+def from_unix_milliseconds(value: object) -> datetime | None:
+    """A Unix time in milliseconds as a local datetime, or None."""
+    if not isinstance(value, int):
+        return None
+    return datetime.fromtimestamp(value / 1000).astimezone()
+
+
+def read_live_sessions() -> list[LiveSession]:
+    """Running sessions, interactive and background; raise if unreadable."""
+    return [
+        LiveSession(
+            pid=int(record.get("pid", 0)),
+            id=record.get("sessionId", ""),
+            cwd=record.get("cwd", ""),
+            kind=record.get("kind", ""),
+            status=record.get("status", "unknown"),
+            name=record.get("name", ""),
+            started=from_unix_milliseconds(record.get("startedAt")),
+        )
+        for record in json.loads(run(["claude", "agents", "--json"]))
+    ]
+
+
+def list_tmux_panes() -> dict[int, str]:
+    """Pane ids (session:window.pane) by the pid they run; empty without tmux."""
+    try:
+        output = run(["tmux", "list-panes", "-a", "-F", TMUX_PANE_FORMAT])
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return {}
+    pairs = (line.split("\t", 1) for line in output.splitlines())
+    return {int(pid): pane for pid, pane in pairs}
+
+
+def parent_pid(pid: int) -> int:
+    """Parent process id, from /proc (1 when unknown)."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return 1
+    # The command name is in parentheses and may hold spaces: the fields
+    # follow the last ')'.
+    return int(stat.rsplit(")", 1)[1].split()[1])
+
+
+def find_pane(pid: int, panes: dict[int, str]) -> str | None:
+    """The tmux pane running the process or one of its parents."""
+    while pid > 1:
+        if pid in panes:
+            return panes[pid]
+        pid = parent_pid(pid)
+    return None
+
+
+def format_age(elapsed: timedelta) -> str:
+    """A duration as '5 min', '3 h' or '2 d'."""
+    minutes = int(elapsed.total_seconds() // 60)
+    if minutes < 60:
+        return f"{minutes} min"
+    if minutes < 24 * 60:
+        return f"{minutes // 60} h"
+    return f"{minutes // (24 * 60)} d"
+
+
+def render_live_session(
+    session: LiveSession, pane: str | None, is_own: bool, now: datetime
+) -> list[str]:
+    """One line for the session, plus its latest recap when it has one."""
+    transcript = find_transcript(session.id)
+    written = read_session(transcript, None) if transcript else None
+    parts = [
+        session.cwd,
+        session.name,
+        "this session" if is_own else "",
+        session.kind,
+        session.status,
+        f"tmux {pane}" if pane else "no tmux",
+        f"up {format_age(now - session.started)}" if session.started else "",
+    ]
+    if transcript and written:
+        last_write = datetime.fromtimestamp(transcript.stat().st_mtime)
+        parts.append(f"active {format_age(now - last_write.astimezone())} ago")
+        parts.append(f'"{written.title}"' if written.title else "")
+    lines = ["- " + " · ".join(part for part in parts if part)]
+    if written and written.last_recap:
+        recap_time, recap = written.last_recap
+        age = format_age(now - recap_time)
+        lines.append(f"  recap, {age} ago: {clip(recap, REPLY_CHARS)}")
+    return lines
+
+
+def render_live_sessions(own_session_id: str | None) -> list[str]:
+    """The Claude sessions running now, with their tmux pane and recap."""
+    header = "## Running now"
+    try:
+        sessions = read_live_sessions()
+    except (
+        subprocess.CalledProcessError,
+        FileNotFoundError,
+        ValueError,
+    ) as error:
+        return not_read(header, error)
+    panes = list_tmux_panes()
+    now = datetime.now().astimezone()
+    lines = [
+        line
+        for session in sessions
+        for line in render_live_session(
+            session,
+            find_pane(session.pid, panes),
+            session.id == own_session_id,
+            now,
+        )
+    ]
+    return [header, *(lines or ["- none"])]
+
+
 def parse_args(argv: list[str]) -> tuple[str | None, list[str], str | None]:
     """Split argv into (scope, period words, session id)."""
     words, session_id = list(argv), None
@@ -448,10 +595,9 @@ def parse_args(argv: list[str]) -> tuple[str | None, list[str], str | None]:
 
 
 def select(
-    argv: list[str],
+    scope: str | None, period_words: list[str], session_id: str | None
 ) -> tuple[str, Window, dict[Path | None, list[Session]]]:
     """The scope, its window, and its sessions grouped by repository."""
-    scope, period_words, session_id = parse_args(argv)
     today = date.today()
     current_root = find_repo_root(str(Path.cwd()))
     scope = scope or ("repo" if current_root else "machine")
@@ -459,6 +605,8 @@ def select(
         if not session_id:
             raise UsageError("session scope needs --session <id>")
         transcript = find_transcript(session_id)
+        if not transcript:
+            raise ScopeError(f"no transcript for session {session_id}")
         session = read_session(transcript, None)
         if not session.has_activity():
             raise ScopeError(f"session {session_id} has no activity")
@@ -480,7 +628,8 @@ def select(
 
 
 def collect(argv: list[str]) -> str:
-    scope, window, groups = select(argv)
+    scope, period_words, session_id = parse_args(argv)
+    scope, window, groups = select(scope, period_words, session_id)
     lines = [
         (
             f"# Debrief data, {scope} scope, "
@@ -497,6 +646,8 @@ def collect(argv: list[str]) -> str:
         for session in groups[None]:
             lines += render_session(session)
     lines += render_github(window, None if scope == "machine" else names)
+    if scope == "machine":
+        lines += render_live_sessions(session_id)
     return "\n".join(lines)
 
 

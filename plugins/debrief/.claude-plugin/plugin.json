@@ -1,6 +1,6 @@
 {
   "name": "debrief",
-  "description": "Report what was done on this machine over a period, from git, GitHub events and Claude Code transcripts: for the current session, repository or the whole machine.",
+  "description": "Report what was done on this machine over a period, from git, GitHub events and Claude Code transcripts: for the current session, repository or the whole machine, with the Claude sessions running now.",
   "author": { "name": "alxn0" },
   "repository": "https://github.com/alxn0/toolshed",
   "license": "MIT"
