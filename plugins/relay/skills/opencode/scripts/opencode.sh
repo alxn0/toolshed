@@ -32,20 +32,6 @@ for tool in opencode jq; do
   command -v "$tool" >/dev/null || { echo "$tool is not installed (see toolshed's README)" >&2; exit 2; }
 done
 
-# Exports provider keys kept in passage as opencode/<ENV_VAR> (e.g. opencode/GEMINI_API_KEY).
-# They reach only opencode's private (--standalone) server, never a file or the shared service.
-export_passage_keys() {
-  command -v passage >/dev/null || return 0
-  local entry name value
-  for entry in "${PASSAGE_DIR:-$HOME/.passage/store}"/opencode/*.age; do
-    [[ -e $entry ]] || continue
-    name=$(basename "$entry" .age)
-    [[ $name =~ ^[A-Z][A-Z0-9_]*$ ]] || fail "passage entry opencode/$name is not an environment variable name"
-    value=$(passage show "opencode/$name") || fail "could not read passage entry opencode/$name"
-    export "$name=${value%%$'\n'*}"
-  done
-}
-
 list_models() {
   local all matches word
   all=$(opencode models --standalone) || fail "could not list models"
@@ -73,7 +59,6 @@ command=$1 dir=$2
 shift 2
 [[ -d $dir ]] || fail "no such folder: $dir"
 cd "$dir"
-export_passage_keys
 case $command in
   models) list_models "$@" ;;
   ask) (($# == 1 || $# == 2)) || usage; ask "$@" ;;
