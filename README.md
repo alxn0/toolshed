@@ -44,7 +44,10 @@ claude plugin marketplace add alxn0/toolshed
 claude plugin install relay@toolshed   # repeat per plugin
 ```
 
-`opencode` needs [opencode](https://opencode.ai) and `jq`. `debrief` reads GitHub through `gh` when it is logged in. `memo` needs [folio](https://github.com/dixie6502/folio) on `PATH`, and `note` needs `wkref` for
+`opencode` needs [opencode](https://opencode.ai) and `jq`. Provider API keys can live in
+[passage](https://github.com/FiloSottile/passage) as `opencode/<ENV_VAR>` (e.g.
+`passage insert opencode/GEMINI_API_KEY`): the script exports each one to opencode's private
+server only, so no key is stored unencrypted. `debrief` reads GitHub through `gh` when it is logged in. `memo` needs [folio](https://github.com/dixie6502/folio) on `PATH`, and `note` needs `wkref` for
 its links. Every `TODO.md` and note lives in the current folder's folio notebook, outside the
 clones: the owner's `notebooks/` store (the owner's notes repository cloned into
 `~/<host>/<owner>/notebooks`), or a local `notes/` folder elsewhere. folio's `folio-sync` service
